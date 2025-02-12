@@ -2,14 +2,24 @@
 
 import { useUser } from '@clerk/nextjs';
 import { Alert, Button, FileInput, Select, TextInput } from 'flowbite-react';
+
 import dynamic from 'next/dynamic';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
+// https://dev.to/a7u/reactquill-with-nextjs-478b
 import 'react-quill-new/dist/quill.snow.css';
+
+import {
+  getDownloadURL,
+  getStorage,
+  ref,
+  uploadBytesResumable,
+} from 'firebase/storage';
+import { app } from '@/firebase';
+
 import { CircularProgressbar } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
-import axios from 'axios'; // Add axios for Cloudinary API calls
 
 export default function CreatePostPage() {
   const { isSignedIn, user, isLoaded } = useUser();
@@ -29,36 +39,33 @@ export default function CreatePostPage() {
         return;
       }
       setImageUploadError(null);
-
-      // Hardcoded Cloudinary credentials
-      const cloudName = 'dpwo3i4ea'; // Replace with your Cloudinary cloud name
-      const uploadPreset = 'taimoor2'; // Replace with your Cloudinary upload preset
-
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('upload_preset', uploadPreset);
-
-      const response = await axios.post(
-        `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-        formData,
-        {
-          onUploadProgress: (progressEvent) => {
-            const progress = Math.round(
-              (progressEvent.loaded * 100) / progressEvent.total
-            );
-            setImageUploadProgress(progress);
-          },
+      const storage = getStorage(app);
+      const fileName = new Date().getTime() + '-' + file.name;
+      const storageRef = ref(storage, fileName);
+      const uploadTask = uploadBytesResumable(storageRef, file);
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          const progress =
+            (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          setImageUploadProgress(progress.toFixed(0));
+        },
+        (error) => {
+          setImageUploadError('Image upload failed');
+          setImageUploadProgress(null);
+        },
+        () => {
+          getDownloadURL(uploadTask.snapshot.ref).then((downloadURL) => {
+            setImageUploadProgress(null);
+            setImageUploadError(null);
+            setFormData({ ...formData, image: downloadURL });
+          });
         }
       );
-
-      const downloadURL = response.data.secure_url;
-      setImageUploadProgress(null);
-      setImageUploadError(null);
-      setFormData({ ...formData, image: downloadURL });
     } catch (error) {
-      console.error('Cloudinary Error:', error);
-      setImageUploadError('Image upload failed. Check the console for details.');
+      setImageUploadError('Image upload failed');
       setImageUploadProgress(null);
+      console.log(error);
     }
   };
 
